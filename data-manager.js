@@ -1,558 +1,351 @@
-// data-manager.js - Business Logic for BI Anomaly Detection System
-
+// Data Manager - Управление на данни и логика
 class DataManager {
     constructor() {
-        this.storageKeys = {
-            data: 'biSystemData',
-            alerts: 'biSystemAlerts', 
-            settings: 'biSystemSettings'
-        };
-        this.initializeSettings();
+        this.data = this.loadData();
+        this.thresholds = this.loadThresholds();
+        this.initializeSystem();
     }
 
-    // Initialize default settings
-    initializeSettings() {
-        const defaultSettings = {
-            sales: {
-                minThreshold: 1000,
-                maxThreshold: 50000,
-                percentChange: 20
-            },
-            traffic: {
-                minThreshold: 100,
-                maxThreshold: 10000,
-                percentChange: 30
-            },
-            production: {
-                minThreshold: 50,
-                maxThreshold: 1000,
-                percentChange: 25
-            },
-            financial: {
-                minThreshold: 5000,
-                maxThreshold: 100000,
-                percentChange: 15
-            },
-            autoScanInterval: 3600 // 1 hour in seconds
+    // Зареждане на данни от localStorage
+    loadData() {
+        const stored = localStorage.getItem('biSystemData');
+        return stored ? JSON.parse(stored) : [];
+    }
+
+    // Запазване на данни в localStorage
+    saveData() {
+        localStorage.setItem('biSystemData', JSON.stringify(this.data));
+    }
+
+    // Зареждане на прагове за алерти
+    loadThresholds() {
+        const stored = localStorage.getItem('biSystemThresholds');
+        return stored ? JSON.parse(stored) : {
+            sales: { min: 1000, max: 10000 },
+            traffic: { min: 500, max: 5000 },
+            production: { min: 100, max: 1000 },
+            finance: { min: 5000, max: 50000 }
+        };
+    }
+
+    // Запазване на прагове
+    saveThresholds() {
+        localStorage.setItem('biSystemThresholds', JSON.stringify(this.thresholds));
+    }
+
+    // Добавяне на нови данни
+    addData(date, type, value, description) {
+        const newEntry = {
+            id: Date.now(),
+            date: date,
+            type: type,
+            value: parseFloat(value),
+            description: description,
+            timestamp: new Date().toISOString()
         };
 
-        const existingSettings = this.getSettings();
-        if (!existingSettings || Object.keys(existingSettings).length === 0) {
-            this.saveSettings(defaultSettings);
+        this.data.push(newEntry);
+        this.saveData();
+        this.checkForAnomalies(newEntry);
+        return newEntry;
+    }
+
+    // Изтриване на данни
+    deleteData(id) {
+        this.data = this.data.filter(item => item.id !== parseInt(id));
+        this.saveData();
+    }
+
+    // Импорт от CSV
+    importFromCSV(csvText) {
+        const lines = csvText.split('\n');
+        const imported = [];
+        
+        for (let i = 1; i < lines.length; i++) { // Пропускаме header-а
+            const line = lines[i].trim();
+            if (line) {
+                const [date, value, type, description] = line.split(',');
+                if (date && value && type) {
+                    const entry = this.addData(
+                        date.trim(),
+                        type.trim(),
+                        parseFloat(value.trim()),
+                        description ? description.trim() : ''
+                    );
+                    imported.push(entry);
+                }
+            }
         }
+        
+        return imported;
     }
 
-    // Data Management Methods
-    getAllData() {
-        const data = localStorage.getItem(this.storageKeys.data);
-        return data ? JSON.parse(data) : [];
+    // Експорт към CSV
+    exportToCSV() {
+        const headers = ['Дата', 'Стойност', 'Тип', 'Описание'];
+        const csvContent = [
+            headers.join(','),
+            ...this.data.map(item => 
+                `${item.date},${item.value},${item.type},"${item.description}"`
+            )
+        ].join('\n');
+        
+        return csvContent;
     }
 
-    addDataEntry(entry) {
-        const data = this.getAllData();
-        entry.id = entry.id || Date.now();
-        entry.timestamp = entry.timestamp || new Date().toISOString();
-        data.push(entry);
-        localStorage.setItem(this.storageKeys.data, JSON.stringify(data));
-        
-        // Log the action
-        console.log('Добавен запис:', entry);
-        
-        return entry;
+    // Проверка за аномалии
+    checkForAnomalies(entry) {
+        const threshold = this.thresholds[entry.type];
+        if (!threshold) return null;
+
+        let anomaly = null;
+        if (entry.value < threshold.min) {
+            anomaly = {
+                type: 'low',
+                message: `Ниска стойност за ${this.getTypeLabel(entry.type)}: ${entry.value}`,
+                severity: 'warning',
+                timestamp: new Date().toISOString()
+            };
+        } else if (entry.value > threshold.max) {
+            anomaly = {
+                type: 'high', 
+                message: `Висока стойност за ${this.getTypeLabel(entry.type)}: ${entry.value}`,
+                severity: 'danger',
+                timestamp: new Date().toISOString()
+            };
+        }
+
+        if (anomaly && window.uiManager) {
+            window.uiManager.addAlert(anomaly);
+        }
+
+        return anomaly;
     }
 
-    deleteDataEntry(id) {
-        const data = this.getAllData();
-        const filteredData = data.filter(entry => entry.id !== id);
-        localStorage.setItem(this.storageKeys.data, JSON.stringify(filteredData));
+    // Получаване на етикет за тип
+    getTypeLabel(type) {
+        const labels = {
+            sales: 'Продажби',
+            traffic: 'Трафик', 
+            production: 'Производство',
+            finance: 'Финанси'
+        };
+        return labels[type] || type;
+    }
+
+    // Получаване на статистики
+    getStats() {
+        if (this.data.length === 0) {
+            return {
+                sales: { current: 0, trend: 0, total: 0 },
+                traffic: { current: 0, trend: 0, total: 0 },
+                production: { current: 0, trend: 0, total: 0 },
+                finance: { current: 0, trend: 0, total: 0 }
+            };
+        }
+
+        const stats = {};
+        const types = ['sales', 'traffic', 'production', 'finance'];
         
-        console.log('Изтрит запис с ID:', id);
+        types.forEach(type => {
+            const typeData = this.data.filter(item => item.type === type);
+            if (typeData.length > 0) {
+                const values = typeData.map(item => item.value);
+                const current = values[values.length - 1] || 0;
+                const previous = values[values.length - 2] || current;
+                const trend = current - previous;
+                const total = values.reduce((sum, val) => sum + val, 0);
+                
+                stats[type] = { current, trend, total };
+            } else {
+                stats[type] = { current: 0, trend: 0, total: 0 };
+            }
+        });
+
+        return stats;
+    }
+
+    // Получаване на данни за графика
+    getChartData(type = null, days = 30) {
+        let filteredData = this.data;
         
+        if (type) {
+            filteredData = this.data.filter(item => item.type === type);
+        }
+
+        // Филтриране по дни
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - days);
+        
+        filteredData = filteredData.filter(item => 
+            new Date(item.date) >= cutoffDate
+        );
+
+        // Сортиране по дата
+        filteredData.sort((a, b) => new Date(a.date) - new Date(b.date));
+
         return filteredData;
     }
 
-    getDataByType(type) {
-        const data = this.getAllData();
-        return data.filter(entry => entry.type === type);
+    // Изчистване на всички данни
+    clearAllData() {
+        this.data = [];
+        this.saveData();
+        localStorage.removeItem('biSystemAlerts');
     }
 
-    getDataByDateRange(startDate, endDate) {
-        const data = this.getAllData();
-        return data.filter(entry => {
-            const entryDate = new Date(entry.date);
-            return entryDate >= new Date(startDate) && entryDate <= new Date(endDate);
-        });
-    }
+    // Инициализиране на системата
+    initializeSystem() {
+        // Автоматично запазване на данни на всеки 5 минути
+        setInterval(() => {
+            this.saveData();
+        }, 5 * 60 * 1000);
 
-    // Alert Management Methods
-    getAllAlerts() {
-        const alerts = localStorage.getItem(this.storageKeys.alerts);
-        return alerts ? JSON.parse(alerts) : [];
-    }
-
-    addAlert(alert) {
-        const alerts = this.getAllAlerts();
-        alert.id = alert.id || Date.now();
-        alert.timestamp = alert.timestamp || new Date().toISOString();
-        alert.read = alert.read || false;
-        alerts.unshift(alert); // Add to beginning
-        localStorage.setItem(this.storageKeys.alerts, JSON.stringify(alerts));
-        
-        console.log('Добавен алерт:', alert);
-        
-        return alert;
-    }
-
-    markAlertAsRead(id) {
-        const alerts = this.getAllAlerts();
-        const alert = alerts.find(a => a.id === id);
-        if (alert) {
-            alert.read = true;
-            localStorage.setItem(this.storageKeys.alerts, JSON.stringify(alerts));
+        // Симулация на нови данни (за демо)
+        if (this.data.length === 0) {
+            this.generateSampleData();
         }
-        return alerts;
     }
 
-    markAllAlertsAsRead() {
-        const alerts = this.getAllAlerts();
-        alerts.forEach(alert => alert.read = true);
-        localStorage.setItem(this.storageKeys.alerts, JSON.stringify(alerts));
-        return alerts;
-    }
-
-    clearAllAlerts() {
-        localStorage.setItem(this.storageKeys.alerts, JSON.stringify([]));
-        console.log('Изчистени всички алерти');
-        return [];
-    }
-
-    deleteAlert(id) {
-        const alerts = this.getAllAlerts();
-        const filteredAlerts = alerts.filter(alert => alert.id !== id);
-        localStorage.setItem(this.storageKeys.alerts, JSON.stringify(filteredAlerts));
-        return filteredAlerts;
-    }
-
-    // Settings Management Methods
-    getSettings() {
-        const settings = localStorage.getItem(this.storageKeys.settings);
-        return settings ? JSON.parse(settings) : {};
-    }
-
-    saveSettings(settings) {
-        localStorage.setItem(this.storageKeys.settings, JSON.stringify(settings));
-        console.log('Настройките са запазени:', settings);
-        return settings;
-    }
-
-    resetSettings() {
-        localStorage.removeItem(this.storageKeys.settings);
-        this.initializeSettings();
-        return this.getSettings();
-    }
-
-    // Anomaly Detection Methods
-    runAnomalyCheck() {
-        const data = this.getAllData();
-        const settings = this.getSettings();
-        const alerts = [];
-
-        console.log('Започвам проверка за аномалии...');
-
-        // Group data by type
-        const dataByType = {};
-        data.forEach(entry => {
-            if (!dataByType[entry.type]) {
-                dataByType[entry.type] = [];
-            }
-            dataByType[entry.type].push(entry);
-        });
-
-        // Check each data type
-        Object.keys(dataByType).forEach(type => {
-            const typeData = dataByType[type];
-            const typeSettings = settings[type];
-
-            if (!typeSettings) {
-                console.warn(`Няма настройки за тип: ${type}`);
-                return;
-            }
-
-            // Sort by date
-            typeData.sort((a, b) => new Date(a.date) - new Date(b.date));
-
-            // Check threshold violations
-            typeData.forEach(entry => {
-                if (entry.value < typeSettings.minThreshold) {
-                    alerts.push({
-                        type: 'threshold',
-                        severity: 'high',
-                        dataType: type,
-                        message: `Стойността ${entry.value} е под минималния праг ${typeSettings.minThreshold}`,
-                        data: entry,
-                        date: entry.date
-                    });
-                }
-
-                if (entry.value > typeSettings.maxThreshold) {
-                    alerts.push({
-                        type: 'threshold',
-                        severity: 'high',
-                        dataType: type,
-                        message: `Стойността ${entry.value} е над максималния праг ${typeSettings.maxThreshold}`,
-                        data: entry,
-                        date: entry.date
-                    });
-                }
-            });
-
-            // Check percentage changes
-            for (let i = 1; i < typeData.length; i++) {
-                const current = typeData[i];
-                const previous = typeData[i - 1];
-                
-                const change = ((current.value - previous.value) / previous.value) * 100;
-                const absChange = Math.abs(change);
-
-                if (absChange > typeSettings.percentChange) {
-                    const direction = change > 0 ? 'увеличение' : 'намаление';
-                    alerts.push({
-                        type: 'percentage',
-                        severity: absChange > typeSettings.percentChange * 2 ? 'high' : 'medium',
-                        dataType: type,
-                        message: `${direction.charAt(0).toUpperCase() + direction.slice(1)} от ${absChange.toFixed(1)}% между ${previous.date} и ${current.date}`,
-                        data: { current, previous, change: absChange },
-                        date: current.date
-                    });
-                }
-            }
-        });
-
-        // Save alerts
-        alerts.forEach(alert => this.addAlert(alert));
-
-        console.log(`Открити ${alerts.length} аномалии`);
+    // Генериране на примерни данни
+    generateSampleData() {
+        const types = ['sales', 'traffic', 'production', 'finance'];
+        const today = new Date();
         
-        return alerts;
+        for (let i = 7; i >= 0; i--) {
+            const date = new Date(today);
+            date.setDate(date.getDate() - i);
+            
+            types.forEach(type => {
+                const value = Math.floor(Math.random() * 5000) + 1000;
+                this.addData(
+                    date.toISOString().split('T')[0],
+                    type,
+                    value,
+                    `Автоматично генерирани данни`
+                );
+            });
+        }
     }
 
-    // Statistical Methods
-    getStatistics() {
-        const data = this.getAllData();
-        const alerts = this.getAllAlerts();
+    // Получаване на системна информация
+    getSystemInfo() {
+        const dataSize = new Blob([JSON.stringify(this.data)]).size;
+        const formatSize = (bytes) => {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return Math.round(bytes / 1024) + ' KB';
+            return Math.round(bytes / (1024 * 1024)) + ' MB';
+        };
 
         return {
-            totalRecords: data.length,
-            totalAlerts: alerts.length,
-            unreadAlerts: alerts.filter(a => !a.read).length,
-            highSeverityAlerts: alerts.filter(a => a.severity === 'high').length,
-            mediumSeverityAlerts: alerts.filter(a => a.severity === 'medium').length,
-            lowSeverityAlerts: alerts.filter(a => a.severity === 'low').length,
-            dataByType: this.getDataCountByType(),
-            lastCheck: this.getLastCheckTime(),
-            storageUsage: this.getStorageUsage()
+            totalUsers: 1,
+            totalData: this.data.length,
+            storageUsed: formatSize(dataSize),
+            lastLogin: 'Сега'
         };
     }
+}
 
-    getDataCountByType() {
-        const data = this.getAllData();
-        const counts = {};
-        
-        data.forEach(entry => {
-            counts[entry.type] = (counts[entry.type] || 0) + 1;
-        });
-        
-        return counts;
+// Инициализиране на глобален обект
+window.dataManager = new DataManager();
+
+// Глобални функции за достъп от HTML
+window.addData = function() {
+    const date = document.getElementById('dataDate').value;
+    const type = document.getElementById('dataType').value;
+    const value = document.getElementById('dataValue').value;
+    const description = document.getElementById('dataDescription').value;
+
+    if (!date || !type || !value) {
+        alert('Моля, попълнете всички задължителни полета!');
+        return;
     }
 
-    getLastCheckTime() {
-        const alerts = this.getAllAlerts();
-        if (alerts.length === 0) return null;
-        
-        return new Date(alerts[0].timestamp).toLocaleString('bg-BG');
-    }
+    window.dataManager.addData(date, type, value, description);
+    
+    // Изчистване на формата
+    document.getElementById('dataDate').value = '';
+    document.getElementById('dataType').value = '';
+    document.getElementById('dataValue').value = '';
+    document.getElementById('dataDescription').value = '';
 
-    getStorageUsage() {
-        const data = JSON.stringify(this.getAllData());
-        const alerts = JSON.stringify(this.getAllAlerts());
-        const settings = JSON.stringify(this.getSettings());
-        
-        const totalSize = data.length + alerts.length + settings.length;
-        
-        if (totalSize < 1024) {
-            return `${totalSize} bytes`;
-        } else if (totalSize < 1024 * 1024) {
-            return `${(totalSize / 1024).toFixed(2)} KB`;
-        } else {
-            return `${(totalSize / (1024 * 1024)).toFixed(2)} MB`;
+    // Обновяване на UI
+    if (window.uiManager) {
+        window.uiManager.updateDisplay();
+        window.uiManager.showAlert('success', 'Данните са добавени успешно!');
+    }
+};
+
+window.deleteData = function(id) {
+    if (confirm('Сигурни ли сте, че искате да изтриете този запис?')) {
+        window.dataManager.deleteData(id);
+        if (window.uiManager) {
+            window.uiManager.updateDisplay();
+            window.uiManager.showAlert('success', 'Записът е изтрит!');
         }
     }
+};
 
-    // Data Export/Import Methods
-    exportAllData() {
-        const exportData = {
-            data: this.getAllData(),
-            alerts: this.getAllAlerts(),
-            settings: this.getSettings(),
-            exportDate: new Date().toISOString(),
-            version: '1.0'
-        };
-
-        const dataStr = JSON.stringify(exportData, null, 2);
-        const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-
-        const exportFileDefaultName = `bi-system-backup-${new Date().toISOString().split('T')[0]}.json`;
-
-        const linkElement = document.createElement('a');
-        linkElement.setAttribute('href', dataUri);
-        linkElement.setAttribute('download', exportFileDefaultName);
-        linkElement.click();
-
-        console.log('Данните са експортирани');
+window.exportData = function() {
+    const csvContent = window.dataManager.exportToCSV();
+    const blob = new Blob([csvContent], { type: 'text/csv' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `bi-data-${new Date().toISOString().split('T')[0]}.csv`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    
+    if (window.uiManager) {
+        window.uiManager.showAlert('success', 'Данните са експортирани!');
     }
+};
 
-    importData(jsonData) {
+window.importCSV = function(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
         try {
-            const importData = JSON.parse(jsonData);
+            const csvText = e.target.result;
+            const imported = window.dataManager.importFromCSV(csvText);
             
-            if (importData.data) {
-                localStorage.setItem(this.storageKeys.data, JSON.stringify(importData.data));
+            if (window.uiManager) {
+                window.uiManager.updateDisplay();
+                window.uiManager.showAlert('success', `Импортирани са ${imported.length} записа!`);
             }
-            
-            if (importData.alerts) {
-                localStorage.setItem(this.storageKeys.alerts, JSON.stringify(importData.alerts));
-            }
-            
-            if (importData.settings) {
-                localStorage.setItem(this.storageKeys.settings, JSON.stringify(importData.settings));
-            }
-
-            console.log('Данните са успешно импортирани');
-            return true;
         } catch (error) {
-            console.error('Грешка при импорт на данни:', error);
-            return false;
-        }
-    }
-
-    clearAllData() {
-        const confirmation = confirm('Сигурни ли сте, че искате да изтриете всички данни? Това действие е необратимо!');
-        
-        if (confirmation) {
-            localStorage.removeItem(this.storageKeys.data);
-            localStorage.removeItem(this.storageKeys.alerts);
-            
-            console.log('Всички данни са изчистени');
-            
-            // Reinitialize settings
-            this.initializeSettings();
-            
-            return true;
-        }
-        
-        return false;
-    }
-
-    // CSV Processing Methods
-    parseCSV(csvText) {
-        const lines = csvText.trim().split('\n');
-        const data = [];
-        
-        // Skip header if exists
-        const startIndex = lines[0].toLowerCase().includes('дата') || lines[0].toLowerCase().includes('date') ? 1 : 0;
-        
-        for (let i = startIndex; i < lines.length; i++) {
-            const line = lines[i].trim();
-            if (!line) continue;
-            
-            const columns = line.split(',').map(col => col.trim().replace(/"/g, ''));
-            
-            if (columns.length >= 3) {
-                const entry = {
-                    date: columns[0],
-                    value: parseFloat(columns[1]),
-                    type: columns[2],
-                    description: columns[3] || ''
-                };
-                
-                // Validate data
-                if (entry.date && !isNaN(entry.value) && entry.type) {
-                    data.push(entry);
-                }
+            console.error('Грешка при импорт:', error);
+            if (window.uiManager) {
+                window.uiManager.showAlert('danger', 'Грешка при импорт на файла!');
             }
         }
-        
-        return data;
-    }
+    };
+    reader.readAsText(file);
+};
 
-    // Auto-scan functionality
-    initializeAutoScan() {
-        const settings = this.getSettings();
-        const interval = settings.autoScanInterval;
-        
-        if (interval && interval > 0) {
-            setInterval(() => {
-                console.log('Автоматична проверка за аномалии...');
-                this.runAnomalyCheck();
-            }, interval * 1000);
-            
-            console.log(`Автоматично сканиране активирано: всеки ${interval} секунди`);
+window.clearCache = function() {
+    if (confirm('Това ще изчисти кеша на браузъра. Продължавате?')) {
+        localStorage.clear();
+        if (window.uiManager) {
+            window.uiManager.showAlert('success', 'Кешът е изчистен!');
+        }
+        setTimeout(() => location.reload(), 1000);
+    }
+};
+
+window.resetSystem = function() {
+    if (confirm('ВНИМАНИЕ: Това ще изтрие всички данни! Сигурни ли сте?')) {
+        if (confirm('Това действие е необратимо. Потвърдете отново:')) {
+            window.dataManager.clearAllData();
+            localStorage.clear();
+            if (window.uiManager) {
+                window.uiManager.showAlert('success', 'Системата е нулирана!');
+            }
+            setTimeout(() => location.reload(), 1500);
         }
     }
-
-    // Utility methods
-    formatCurrency(value) {
-        return new Intl.NumberFormat('bg-BG', {
-            style: 'currency',
-            currency: 'BGN'
-        }).format(value);
-    }
-
-    formatNumber(value) {
-        return new Intl.NumberFormat('bg-BG').format(value);
-    }
-
-    formatDate(date) {
-        return new Date(date).toLocaleDateString('bg-BG');
-    }
-
-    formatDateTime(date) {
-        return new Date(date).toLocaleString('bg-BG');
-    }
-}
-
-// Create global instance
-const dataManager = new DataManager();
-
-// Global functions for backward compatibility
-function addDataEntry(entry) {
-    return dataManager.addDataEntry(entry);
-}
-
-function runAnomalyCheck() {
-    return dataManager.runAnomalyCheck();
-}
-
-function clearAllAlerts() {
-    return dataManager.clearAllAlerts();
-}
-
-function markAllAlertsRead() {
-    return dataManager.markAllAlertsAsRead();
-}
-
-function saveSettings() {
-    const settings = {
-        sales: {
-            minThreshold: parseFloat(document.getElementById('salesMinThreshold').value),
-            maxThreshold: parseFloat(document.getElementById('salesMaxThreshold').value),
-            percentChange: parseFloat(document.getElementById('salesPercentChange').value)
-        },
-        traffic: {
-            minThreshold: parseFloat(document.getElementById('trafficMinThreshold').value),
-            maxThreshold: parseFloat(document.getElementById('trafficMaxThreshold').value),
-            percentChange: parseFloat(document.getElementById('trafficPercentChange').value)
-        },
-        production: {
-            minThreshold: parseFloat(document.getElementById('productionMinThreshold').value),
-            maxThreshold: parseFloat(document.getElementById('productionMaxThreshold').value),
-            percentChange: parseFloat(document.getElementById('productionPercentChange').value)
-        },
-        financial: {
-            minThreshold: parseFloat(document.getElementById('financialMinThreshold').value),
-            maxThreshold: parseFloat(document.getElementById('financialMaxThreshold').value),
-            percentChange: parseFloat(document.getElementById('financialPercentChange').value)
-        },
-        autoScanInterval: parseInt(document.getElementById('autoScanInterval').value)
-    };
-    
-    dataManager.saveSettings(settings);
-    showAlert('Настройките са запазени успешно!', 'success');
-}
-
-function resetSettings() {
-    dataManager.resetSettings();
-    loadSettings();
-    showAlert('Настройките са възстановени по подразбиране!', 'success');
-}
-
-function loadSettings() {
-    const settings = dataManager.getSettings();
-    
-    if (settings.sales) {
-        document.getElementById('salesMinThreshold').value = settings.sales.minThreshold;
-        document.getElementById('salesMaxThreshold').value = settings.sales.maxThreshold;
-        document.getElementById('salesPercentChange').value = settings.sales.percentChange;
-    }
-    
-    if (settings.traffic) {
-        document.getElementById('trafficMinThreshold').value = settings.traffic.minThreshold;
-        document.getElementById('trafficMaxThreshold').value = settings.traffic.maxThreshold;
-        document.getElementById('trafficPercentChange').value = settings.traffic.percentChange;
-    }
-    
-    if (settings.production) {
-        document.getElementById('productionMinThreshold').value = settings.production.minThreshold;
-        document.getElementById('productionMaxThreshold').value = settings.production.maxThreshold;
-        document.getElementById('productionPercentChange').value = settings.production.percentChange;
-    }
-    
-    if (settings.financial) {
-        document.getElementById('financialMinThreshold').value = settings.financial.minThreshold;
-        document.getElementById('financialMaxThreshold').value = settings.financial.maxThreshold;
-        document.getElementById('financialPercentChange').value = settings.financial.percentChange;
-    }
-    
-    if (settings.autoScanInterval !== undefined) {
-        document.getElementById('autoScanInterval').value = settings.autoScanInterval;
-    }
-}
-
-function exportAllData() {
-    dataManager.exportAllData();
-}
-
-function clearAllData() {
-    if (dataManager.clearAllData()) {
-        updateDashboard();
-        updateDataTable();
-        updateAlertsList();
-        showAlert('Всички данни са изчистени!', 'success');
-    }
-}
-
-function backupSystem() {
-    dataManager.exportAllData();
-    showAlert('Backup файлът е създаден и свален!', 'success');
-}
-
-function viewSystemLogs() {
-    const stats = dataManager.getStatistics();
-    const logWindow = window.open('', '_blank', 'width=600,height=400');
-    logWindow.document.write(`
-        <html>
-        <head><title>Системни Логове</title></head>
-        <body style="font-family: monospace; padding: 20px;">
-        <h2>Системна Информация</h2>
-        <pre>
-Общо записи: ${stats.totalRecords}
-Общо алерти: ${stats.totalAlerts}
-Непрочетени алерти: ${stats.unreadAlerts}
-Използвано място: ${stats.storageUsage}
-Последна проверка: ${stats.lastCheck || 'Никога'}
-
-Данни по тип:
-${Object.entries(stats.dataByType).map(([type, count]) => `- ${type}: ${count}`).join('\n')}
-
-Генериран на: ${new Date().toLocaleString('bg-BG')}
-        </pre>
-        </body>
-        </html>
-    `);
-}
-
-function initializeAutoScan() {
-    dataManager.initializeAutoScan();
-}
-
-console.log('Data Manager инициализиран успешно!');
+};
