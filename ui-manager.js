@@ -1,4 +1,4 @@
-// UI Manager - Управление на потребителския интерфейс
+// UI Manager - Управление на потребителския интерфейс (Simplified version)
 class UIManager {
     constructor() {
         this.alerts = this.loadAlerts();
@@ -38,7 +38,7 @@ class UIManager {
     updateDisplay() {
         this.updateStats();
         this.updateDataTable();
-        this.updateChart();
+        this.updateSimpleChart();
         this.updateAlerts();
         this.updateSystemInfo();
     }
@@ -133,8 +133,8 @@ class UIManager {
         `).join('');
     }
 
-    // Обновяване на графиката
-    updateChart() {
+    // Обновяване на опростена графика (без Chart.js временно)
+    updateSimpleChart() {
         const chartContainer = document.getElementById('chartContainer');
         if (!chartContainer) return;
 
@@ -145,88 +145,23 @@ class UIManager {
             return;
         }
 
-        // Създаване на canvas елемент ако не съществува
-        let canvas = chartContainer.querySelector('canvas');
-        if (!canvas) {
-            canvas = document.createElement('canvas');
-            canvas.width = 400;
-            canvas.height = 300;
-            chartContainer.innerHTML = '';
-            chartContainer.appendChild(canvas);
-        }
-
-        // Подготовка на данни за Chart.js
-        const groupedData = {};
-        data.forEach(item => {
-            if (!groupedData[item.type]) {
-                groupedData[item.type] = [];
-            }
-            groupedData[item.type].push({
-                x: item.date,
-                y: item.value
-            });
-        });
-
-        const datasets = Object.keys(groupedData).map((type, index) => {
-            const colors = ['#0D8BB1', '#17a2b8', '#28a745', '#ffc107'];
-            return {
-                label: window.dataManager.getTypeLabel(type),
-                data: groupedData[type],
-                borderColor: colors[index % colors.length],
-                backgroundColor: colors[index % colors.length] + '20',
-                fill: false,
-                tension: 0.1
-            };
-        });
-
-        // Унищожаване на предишната графика
-        if (this.chart) {
-            this.chart.destroy();
-        }
-
-        // Създаване на нова графика
-        const ctx = canvas.getContext('2d');
-        this.chart = new Chart(ctx, {
-            type: 'line',
-            data: {
-                datasets: datasets
-            },
-            options: {
-                responsive: true,
-                maintainAspectRatio: false,
-                scales: {
-                    x: {
-                        type: 'time',
-                        time: {
-                            parser: 'YYYY-MM-DD',
-                            displayFormats: {
-                                day: 'DD/MM'
-                            }
-                        },
-                        title: {
-                            display: true,
-                            text: 'Дата'
-                        }
-                    },
-                    y: {
-                        title: {
-                            display: true,
-                            text: 'Стойност'
-                        }
-                    }
-                },
-                plugins: {
-                    legend: {
-                        display: true,
-                        position: 'top'
-                    },
-                    title: {
-                        display: true,
-                        text: 'Тенденции в данните'
-                    }
-                }
-            }
-        });
+        // Временно показваме статистики вместо графика
+        const stats = window.dataManager.getStats();
+        const types = ['sales', 'traffic', 'production', 'finance'];
+        
+        chartContainer.innerHTML = `
+            <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; padding: 1rem;">
+                ${types.map(type => `
+                    <div style="text-align: center; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+                        <h4 style="color: #0D8BB1; margin-bottom: 0.5rem;">${window.dataManager.getTypeLabel(type)}</h4>
+                        <div style="font-size: 1.5rem; font-weight: bold; color: #333;">${stats[type].current}</div>
+                        <div style="font-size: 0.9rem; color: ${stats[type].trend >= 0 ? '#28a745' : '#dc3545'};">
+                            ${stats[type].trend >= 0 ? '↗️ +' : '↘️ '}${stats[type].trend}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
     }
 
     // Обновяване на алертите
