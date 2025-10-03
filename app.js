@@ -121,6 +121,9 @@ function loadScreenData(screenId) {
         case 'adminPanel':
             loadAdminData();
             break;
+        case 'marketBasket':
+            loadMarketBasketData();
+            break;
     }
 }
 
@@ -600,6 +603,29 @@ function showNotification(message, type = 'info') {
     } else {
         alert(message);
     }
+}
+
+// Load Market Basket Analysis data
+function loadMarketBasketData() {
+    // Initialize the market basket analyzer if not already done
+    if (!window.marketBasketAnalyzer) {
+        window.marketBasketAnalyzer = new MarketBasketAnalyzer();
+    }
+    
+    // Reset the UI state
+    const previewSection = document.getElementById('dataPreviewSection');
+    const resultsSection = document.getElementById('analysisResultsSection');
+    const statusDiv = document.getElementById('uploadStatus');
+    
+    if (previewSection) previewSection.style.display = 'none';
+    if (resultsSection) resultsSection.style.display = 'none';
+    if (statusDiv) statusDiv.style.display = 'none';
+    
+    // Clear file input
+    const fileInput = document.getElementById('xlsxFileInput');
+    if (fileInput) fileInput.value = '';
+    
+    console.log('Market Basket Analysis screen loaded');
 }
 
 // Initialize app when DOM is loaded
